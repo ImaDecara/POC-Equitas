@@ -1,0 +1,138 @@
+*{box-sizing:border-box}body{margin:0;background:#0a101d;color:#e8f0fe;font-family:Arial,Helvetica,sans-serif}button,input{font:inherit}button{cursor:pointer;background:#2563eb;color:white;border:0;border-radius:9px;padding:11px 16px;font-weight:700}button:disabled{opacity:.45;cursor:not-allowed}button:hover:not(:disabled){filter:brightness(1.12)}.shell{max-width:1220px;padding:40px 28px;margin:auto}header{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:28px}h1{font-size:40px;margin:8px 0}h1 span{color:#70a5ff}header p{color:#9aabc1}.eyebrow{font-size:11px;letter-spacing:1.6px;color:#87aef2;font-weight:700}.state{color:#a1dfbc;background:#142a27;border:1px solid #275e52;border-radius:50px;padding:12px 16px;white-space:nowrap}.card{background:#101a2b;border:1px solid #22304a;border-radius:16px;margin-bottom:22px;padding:24px}.section-title{display:flex;align-items:center;justify-content:space-between;gap:12px}.section-title h2{margin:0 0 18px}.section-title span{font-size:13px;color:#8fa1b9}.token{display:flex;align-items:center;gap:12px;color:#bbc7da;font-size:13px;margin:4px 0 18px}.token input{background:#0a1221;border:1px solid #304466;color:#f6f9ff;border-radius:7px;padding:9px;min-width:270px}.actions{display:flex;flex-wrap:wrap;gap:10px}.danger{background:#9e304a}.neutral{background:#2b3850}.feedback{margin-bottom:0;color:#9fc9ff}.stats{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:24px}.stat{background:#15243b;border:1px solid #29405b;text-align:left;display:flex;flex-direction:column;gap:7px}.stat.active{border-color:#71acff}.stat b{font-size:26px}.stat span{font-size:11px;color:#9cb2ce;overflow-wrap:anywhere}h3{margin:20px 0 12px}.table-wrap{width:100%;overflow:auto;max-height:450px}table{border-collapse:collapse;min-width:650px;width:100%;font-size:12px}td,th{border-bottom:1px solid #24344c;text-align:left;padding:10px;max-width:330px;overflow-wrap:anywhere}th{color:#93b5e4;background:#162337;position:sticky;top:0}.empty{color:#91a5bf}.cases{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.case{display:flex;align-items:center;justify-content:space-between;border:1px solid #30425d;padding:16px;border-radius:10px;gap:10px}.case div{display:flex;flex-direction:column;gap:7px}.result{margin-top:18px;background:#17263b;padding:16px;border-radius:10px}.result .table-wrap{margin-top:12px}.history{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto}.history-item{text-align:left;display:flex;align-items:center;gap:18px;justify-content:space-between;background:#17263b}.history-item span{flex:1}.history-item small{font-weight:400}.ok{color:#65e8a0}.bad{color:#ff879a}.logtree{margin-top:20px;background:#0c1523;padding:16px;border-radius:10px}.log{padding:10px;background:#19263a;border-radius:8px;font-size:13px}.log span,.log small{margin-left:10px}.log p{margin:7px 0 0;color:#9babc2;font-size:12px}@media(max-width:850px){.stats{grid-template-columns:repeat(3,1fr)}.cases{grid-template-columns:1fr}header{flex-direction:column;align-items:flex-start}}@media(max-width:550px){.shell{padding:20px 12px}.stats{grid-template-columns:repeat(2,1fr)}.card{padding:14px}.token{flex-direction:column;align-items:flex-start}}
+
+/* Keep records readable; scroll horizontally instead of crushing names and IDs. */
+.entity-table{max-height:540px;border:1px solid #293b55;border-radius:10px}
+.entity-table table{width:max-content;min-width:100%;table-layout:auto;font-size:13px}
+.entity-table td,.entity-table th{min-width:125px;max-width:330px;white-space:normal;overflow-wrap:break-word;vertical-align:top;padding:13px 15px;line-height:1.45}
+.entity-table td:first-child,.entity-table th:first-child{min-width:200px}
+.entity-table th{white-space:nowrap}
+.entity-table td:last-child{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#91a5bf;min-width:240px}
+
+
+/* EQUITAS POC — display the entire Element hierarchy in one screenshot.
+   Only Element Records are affected. Other entity tables retain their scrolling. */
+.entity-table.element-full-table {
+  max-height: none;
+  height: auto;
+  overflow: visible;
+  border: 1px solid #293b55;
+  border-radius: 10px;
+}
+.entity-table.element-full-table table {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  table-layout: fixed;
+  font-size: 12px;
+}
+.entity-table.element-full-table th,
+.entity-table.element-full-table td {
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  padding: 9px 8px;
+  line-height: 1.3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  vertical-align: middle;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 12px;
+}
+.entity-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  border: 1px solid rgba(120, 160, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(9, 20, 45, 0.72);
+}
+
+.entity-table-wrapper--full {
+  width: 100%;
+  max-width: 100%;
+}
+
+.entity-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.entity-table thead th {
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #9fc0ff;
+  background: rgba(18, 33, 69, 0.95);
+  border-bottom: 1px solid rgba(120, 160, 255, 0.18);
+}
+
+.entity-table tbody td {
+  padding: 8px 12px;
+  color: #e7eefc;
+  border-bottom: 1px solid rgba(120, 160, 255, 0.10);
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.entity-table tbody tr:hover {
+  background: rgba(58, 102, 255, 0.08);
+}
+
+.entity-table--elements th:nth-child(1),
+.entity-table--elements td:nth-child(1) {
+  width: 28%;
+}
+
+.entity-table--elements th:nth-child(2),
+.entity-table--elements td:nth-child(2) {
+  width: 23%;
+}
+
+.entity-table--elements th:nth-child(3),
+.entity-table--elements td:nth-child(3) {
+  width: 12%;
+}
+
+.entity-table--elements th:nth-child(4),
+.entity-table--elements td:nth-child(4) {
+  width: 22%;
+}
+
+.entity-table--elements th:nth-child(5),
+.entity-table--elements td:nth-child(5) {
+  width: 7%;
+  text-align: center;
+}
+
+.entity-table--elements th:nth-child(6),
+.entity-table--elements td:nth-child(6) {
+  width: 8%;
+}
+
+.entity-table .col-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.entity-table.element-full-table th:first-child,
+.entity-table.element-full-table td:first-child { min-width: 0; width: 21%; }
+.entity-table.element-full-table th:nth-child(2),
+.entity-table.element-full-table td:nth-child(2) { width: 20%; }
+.entity-table.element-full-table th:nth-child(3),
+.entity-table.element-full-table td:nth-child(3) { width: 12%; }
+.entity-table.element-full-table th:nth-child(4),
+.entity-table.element-full-table td:nth-child(4) { width: 22%; }
+.entity-table.element-full-table th:nth-child(5),
+.entity-table.element-full-table td:nth-child(5) { width: 7%; text-align:center; }
+.entity-table.element-full-table th:nth-child(6),
+.entity-table.element-full-table td:nth-child(6) { width: 18%; }
+.entity-table.element-full-table th { position: static; }

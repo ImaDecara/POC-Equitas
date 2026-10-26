@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: equitas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: equitas
+      POSTGRES_PASSWORD: equitas123
+      POSTGRES_DB: equitas_admin
+    ports:
+      - "5433:5432"
+    volumes:
+      - equitas_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  equitas_postgres_data:
