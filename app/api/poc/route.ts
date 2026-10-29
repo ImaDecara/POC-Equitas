@@ -1,4 +1,4 @@
-import { initializeDb, deleteDb, clearLogs, overview, entityNames, listEntity, executionList, executionTree, runCase, exclusive } from '../../../src/server/poc';
+import { initializeDb, deleteDb, clearLogs, overview, entityNames, listEntity, executionList, executionRecords, runCase, exclusive } from '../../../src/server/poc';
 
 // Fuerza a que esta ruta se ejecute en el runtime de Node.js (no en Edge),
 // necesario para usar Buffer, variables de entorno y acceso a la base de datos.
@@ -7,15 +7,12 @@ export const runtime = 'nodejs';
 // Ruta de API única para el POC local. El navegador nunca accede directamente
 // a la base de datos: todo pasa por este servidor.
 
-// Respuesta de error estándar: devuelve un JSON con el mensaje y HTTP 400.
+// Devuelve un mensaje de error uniforme para la interfaz.
 function errorResponse(error: unknown) {
   return Response.json({error: error instanceof Error ? error.message : 'Unexpected error'}, {status: 400});
 }
 
-// Protección de las operaciones de administración (todas las que usan POST).
-// 1) En producción quedan bloqueadas, salvo que ENABLE_POC_ADMIN sea 'true'.
-// 2) El cliente debe enviar el header 'x-poc-token' con el mismo valor
-//    que la variable de entorno POC_ADMIN_TOKEN; si no, se rechaza la petición.
+// Protege los POST mediante el token y el bloqueo opcional en producción.
 function protect(req: Request) {
   if (process.env.NODE_ENV === 'production' && process.env.ENABLE_POC_ADMIN !== 'true') throw new Error('POC administration is disabled in production');
   const token = process.env.POC_ADMIN_TOKEN;
@@ -59,11 +56,11 @@ export async function GET(req: Request) {
       }
       // Lista de ejecuciones realizadas
       case 'executions': return Response.json(await executionList());
-      // Detalle de una ejecución concreta en forma de árbol (requiere ?id=...)
+      // Registros reales de Log correspondientes al intervalo de la ejecución.
       case 'execution': {
         const id = url.searchParams.get('id');
         if (!id) throw new Error('Execution ID is required');
-        return Response.json(await executionTree(id));
+        return Response.json(await executionRecords(id));
       }
       default: throw new Error('Unknown action');
     }

@@ -11,7 +11,7 @@ export interface TestData {
   service: Element;
   integrations: Element[];
   steps: Record<string, Element>;
-  statuses: { pending: LogStatus; running: LogStatus; success: LogStatus; failed: LogStatus };
+  statuses: {success: LogStatus; failed: LogStatus;};
   configurations: ClientElementConfig[];
 }
 
@@ -26,11 +26,10 @@ export class TestDataFactory {
       return item;
     };
     const statuses = {
-      pending: status('PENDING', 'Not started'),
-      running: status('RUNNING', 'In progress'),
       success: status('SUCCESS', 'Completed'),
       failed: status('FAILED', 'Execution failed'),
     };
+
     const type = (code: string, parent?: ElementType) => {
       const item = new ElementType();
       item.Name = code; item.Code = code; item.Description = `${code} workflow node`;

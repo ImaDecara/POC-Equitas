@@ -6,7 +6,6 @@ const entities = ['Client', 'ElementType', 'Element', 'ClientElementConfig', 'Lo
 const cases = ['Happy Path', 'Failure Without Fallback', 'Fallback Recovery', 'Session Retry Limit', 'Accumulated Errors'];
 
 type Row = Record<string, unknown>;
-type LogNode = { id: string; element: string; status: string; details?: string; startedAt: string; children: LogNode[] };
 
 /** Keep API values readable without rendering raw JSON objects in table cells. */
 function display(value: unknown): string {
@@ -53,20 +52,13 @@ function orderElements(records: Row[]): Row[] {
 
 const elementColumns = ['Name', 'Code', 'Type', 'Parent', 'Order', 'Fallback'];
 
-function LogBranch({ node, level = 0 }: { node: LogNode; level?: number }) {
-  return <div style={{ marginLeft: level ? 20 : 0, borderLeft: level ? '1px solid #233348' : undefined, paddingLeft: level ? 12 : 0, marginTop: 8 }}>
-    <div className="log"><b>{node.element}</b><span className={node.status === 'SUCCESS' ? 'ok' : node.status === 'FAILED' ? 'bad' : ''}>{node.status}</span><small>{node.startedAt}</small><p>{node.details}</p></div>
-    {(node.children ?? []).map(n => <LogBranch key={n.id} node={n} level={level + 1} />)}
-  </div>;
-}
-
 export default function Home() {
   const [token, setToken] = useState('');
   const [status, setStatus] = useState<any>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [entity, setEntity] = useState('Element');
   const [executions, setExecutions] = useState<any[]>([]);
-  const [tree, setTree] = useState<LogNode | null>(null);
+  const [selectedLogs, setSelectedLogs] = useState<Row[]>([]);
   const [message, setMessage] = useState('Ready');
   const [working, setWorking] = useState(false);
   const [last, setLast] = useState<any>(null);
@@ -85,10 +77,10 @@ export default function Home() {
       if (s.initialized) {
         const history = await get('/api/poc?action=executions');
         setExecutions(history);
-        if (!history.length) { setTree(null); setLast(null); }
+        if (!history.length) { setSelectedLogs([]); setLast(null); }
         setRows(await get('/api/poc?action=entities&name=' + entity));
       } else {
-        setRows([]); setExecutions([]); setTree(null);
+        setRows([]); setExecutions([]); setSelectedLogs([]);
       }
     } catch (e) { setMessage(String(e)); }
   }
@@ -111,14 +103,14 @@ export default function Home() {
       const j = await r.json();
       if (!r.ok) throw Error(j.error || 'Request failed');
       setMessage(j.message || j.status || 'Completed');
-      if (route === 'clear-logs') { setTree(null); setLast(null); setExecutions([]); }
+      if (route === 'clear-logs') { setSelectedLogs([]); setLast(null); setExecutions([]); }
       if (route === 'run-case') {
         setLast(j);
         setMessage(`Case ${j.caseId}: ${j.result}, ${j.failures} failed attempts`);
-        if (j.rootId) setTree(await get('/api/poc?action=execution&id=' + j.rootId));
+        if (j.rootId) setSelectedLogs(await get('/api/poc?action=execution&id=' + j.rootId));
       }
       await refresh();
-      if (route === 'run-case' && j.rootId) setTree(await get('/api/poc?action=execution&id=' + j.rootId));
+      if (route === 'run-case' && j.rootId) setSelectedLogs(await get('/api/poc?action=execution&id=' + j.rootId));
     } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); }
     finally { setWorking(false); }
   }
@@ -131,7 +123,7 @@ export default function Home() {
   }
 
   async function selectExecution(id: string) {
-    try { setTree(await get('/api/poc?action=execution&id=' + id)); }
+    try { setSelectedLogs(await get('/api/poc?action=execution&id=' + id)); }
     catch (e) { setMessage(String(e)); }
   }
 
@@ -140,7 +132,7 @@ export default function Home() {
 
   return <main className="shell" style={{ width: 'calc(100% - 32px)', maxWidth: '1600px', marginInline: 'auto' }}>
     <header>
-      <div><div className="eyebrow">WORKFLOW DESK TEST ENVIRONMENT</div><h1>EQUITAS <span>POC</span></h1><p>Database administration · Five scenarios · Persisted hierarchical logs</p></div>
+      <div><div className="eyebrow">WORKFLOW DESK TEST ENVIRONMENT</div><h1>EQUITAS <span>POC</span></h1><p>Database administration · Five scenarios · Persisted execution logs</p></div>
       <div className="state">{status?.initialized ? '● Database initialized' : '○ Database not initialized'}</div>
     </header>
 
@@ -179,14 +171,14 @@ export default function Home() {
     <section className="card">
       <div className="section-title"><h2>Desk Test Execution</h2><span>Independent persisted runs</span></div>
       <div className="cases">{cases.map((title, i) => <div className="case" key={i}><div><span className="eyebrow">CASE {i + 1}</span><strong>{title}</strong></div><button disabled={working || !status?.initialized} onClick={() => action('run-case', { caseId: i + 1 })}>Run Case</button></div>)}</div>
-      {last && <div className="result"><b>Latest run:</b> {last.title} · {last.result} · {last.failures} failed attempts{Array.isArray(last.events) && <div className="table-wrap"><table><thead><tr>{Object.keys(last.events[0] ?? {}).map(k => <th key={k}>{k}</th>)}</tr></thead><tbody>{last.events.map((r: Row, i: number) => <tr key={i}>{Object.values(r).map((v, j) => <td key={j}>{display(v)}</td>)}</tr>)}</tbody></table></div>}</div>}
+      {last && <div className="result"><b>Latest run:</b> {last.title} · {last.result} · {last.failures} failed attempts. See Log Records and Execution Logs for persisted fields.</div>}
     </section>
 
     <section className="card">
       <div className="section-title"><h2>Execution Logs</h2><button className="neutral" onClick={refresh}>Refresh</button></div>
       <div className="history">{executions.map(x => <button key={x.id} onClick={() => selectExecution(x.id)} className="history-item"><span>{x.details || x.element}</span><b className={x.status === 'SUCCESS' ? 'ok' : 'bad'}>{x.status}</b><small>{x.startedAt}</small></button>)}</div>
       {!executions.length && <p className="empty">Run a case to see its persisted logs.</p>}
-      {tree && <div className="logtree"><h3>Parent-Child Log Tree</h3><LogBranch node={tree}/></div>}
+      {selectedLogs.length > 0 && <div className="logtree"><h3>Persisted Log Records</h3><p>These are the actual Log fields. Rows are selected by execution time; there is no Log.Parent relation.</p><div className="table-wrap"><table><thead><tr>{['Id','StartedAt','FinishedAt','Status','Element','Value'].map(k=><th key={k}>{k}</th>)}</tr></thead><tbody>{selectedLogs.map((r,i)=><tr key={String(r.Id ?? i)}>{['Id','StartedAt','FinishedAt','Status','Element','Value'].map(k=><td key={k}>{display(r[k])}</td>)}</tr>)}</tbody></table></div></div>}
     </section>
   </main>;
 }

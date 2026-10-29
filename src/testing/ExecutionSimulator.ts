@@ -21,8 +21,8 @@ interface CaseSpec {
 
 /**
  * POC workflow executor: business operations are SIMULATED.
- * All execution Logs, timestamps, element references and Parent relations
- * are REAL MikroORM entities persisted to PostgreSQL.
+ * Each Log represents one finished attempt or one aggregate element execution.
+ * No Log.Parent or state-transition logs: only VPP fields are stored.
  *
  * Definitions used here:
  * - Failed attempt: an operation that returns FAILED (not an additional retry).
@@ -46,6 +46,7 @@ export class ExecutionSimulator {
     return { ...JSON.parse(step.DefaultConfig || '{}'), ...JSON.parse(row.Config || '{}') };
   }
 
+  /** Build the element path without modifying the entity. */
   private static path(element: Element): string {
     const parts: string[] = [];
     const seen = new Set<Element>();
@@ -57,18 +58,16 @@ export class ExecutionSimulator {
     return parts.join('.');
   }
 
-  private static createLog(element: Element, status: LogStatus, detail: string, parent?: Log): Log {
+  /** Create one final-result Log. No extra attributes or Log.Parent relation. */
+  private static createLog(element: Element, detail: string): Log {
     const log = new Log();
     log.Element = element;
-    log.Status = status;
     log.StartedAt = new Date();
     log.Value = detail;
-    if (parent) { log.Parent = parent; parent.Children.add(log); }
-    element.Logs.add(log);
-    status.Log.add(log);
     return log;
   }
 
+  /** Assign the final status and finishing timestamp to a log. */
   private static finish(log: Log, status: LogStatus, detail: string) {
     log.Status = status;
     log.FinishedAt = new Date(Math.max(Date.now(), log.StartedAt.getTime() + 1));
@@ -98,6 +97,7 @@ export class ExecutionSimulator {
     R.success('Five POC cases verified against their expected outcomes');
   }
 
+  /** Simulate the ordered steps, retries and backward fallbacks. */
   private static async runCase(em: any, data: TestData, spec: CaseSpec) {
     R.section(spec.title);
     R.step(`Client: ${data.client.Code} | Service: ${data.service.Code}`);
@@ -112,34 +112,18 @@ export class ExecutionSimulator {
     if (steps.length !== 10 || indexOf('VALIDATE_DEBT_FILE') !== 2 || indexOf('INSERT_DEBTS') !== 4) {
       throw new Error('The five desk tests require A->B->C->D->E->F within TANGO_DEBT_FILE_IMPORT');
     }
-    
+    // Validate that fallbacks target an earlier step in the same integration.
+    for (const [i, step] of steps.entries()) {
+      if (step.Fallback &&
+          (step.Fallback.Parent !== step.Parent ||
+           steps.indexOf(step.Fallback) < 0 ||
+           steps.indexOf(step.Fallback) >= i)) {
+        throw new Error(`Fallback is not backward: ${step.Code} -> ${step.Fallback.Code}`);
+      }
+    }
 
-//Validate backward fallback references.
-for (const step of steps) {
-  if (!step.Fallback) continue;
-
-  const fallback = steps.find(
-    candidate => candidate.Id === step.Fallback?.Id
-  );
-
-  const sameIntegration =
-    fallback?.Parent?.Id === step.Parent?.Id;
-
-  const backward =
-    fallback !== undefined &&
-    Number(fallback.ExecutionOrder) < Number(step.ExecutionOrder);
-
-  if (!fallback || !sameIntegration || !backward) {
-    throw new Error(
-      `Invalid fallback: ${step.Code} -> ${step.Fallback.Code}`
-    );
-  }
-}
-
-
-    const root = this.createLog(data.service, data.statuses.running, `Start ${spec.title}`);
-    em.persist(root);
-    await em.flush();
+    const root = this.createLog(data.service, `Start ${spec.title}`);
+    const completedLogs: Log[] = [root];
     let currentIntegration: Element | undefined;
     let integrationLog: Log | undefined;
     let position = 0;
@@ -147,37 +131,28 @@ for (const step of steps) {
     let result: Result = 'SUCCESS';
     const failuresByStep: Record<string, number> = {};
     const visits: Record<string, number> = {};
-    const events: object[] = [];
-    let seq = 0;
-    const maxEvents = 100; // Safety guard against accidental endless loops.
+    let operationCount = 0;
+    const maxOperations = 100; // In-memory safety guard; not a Log attribute.
 
-    const record = (step: Element, attempt: number | string, status: string, action: string) => {
-      events.push({ Event: ++seq, Element: step.Code, Attempt: attempt, Status: status,
-        SessionFailures: failuresByStep[step.Code] ?? 0, Action: action });
-    };
-
-    while (position < steps.length && events.length < maxEvents) {
+    while (position < steps.length && operationCount < maxOperations) {
       const step = steps[position];
       const integration = step.Parent;
       if (!integration) throw new Error(`Step has no integration: ${step.Code}`);
       if (currentIntegration !== integration) {
-        // A fallback may re-enter an earlier integration; create a fresh container
-        // log so every visit preserves chronological parent-child relationships.
+        // Track each visit to an integration with a separate completed Log.
         if (integrationLog) {
-          this.finish(integrationLog, data.statuses.success, 'Integration traversal exited');
-          await em.flush();
+          this.finish(integrationLog, data.statuses.success, 'Integration traversal completed');
         }
         currentIntegration = integration;
-        integrationLog = this.createLog(integration, data.statuses.running,
-          `Entering integration for ${spec.title}`, root);
-        em.persist(integrationLog);
-        await em.flush();
+        integrationLog = this.createLog(integration,
+          `Entering integration for ${spec.title}`);
+        completedLogs.push(integrationLog);
       }
       if (!integrationLog) throw new Error('Missing integration log');
       visits[step.Code] = (visits[step.Code] ?? 0) + 1;
       const visit = visits[step.Code];
       const cfg = this.config(step, data);
-      record(step, '-', 'RUNNING', `Load configuration: ${JSON.stringify(cfg)}`);
+
 
       // CASE 5: INSERT_DEBTS (E) has a backward fallback to READ_DEBT_FILE (B).
       // Cases 2/3/4: C exhibits the corresponding retry/fallback policies.
@@ -193,16 +168,15 @@ for (const step of steps) {
       // Number of failed attempts is deliberately explicit: 5/5 means five
       // failed operations. The next operation, if allowed, can succeed.
       for (let localAttempt = 1; localAttempt <= targetFailures + 1; localAttempt++) {
+        operationCount++;
+        if (operationCount > maxOperations) break;
         const fails = localAttempt <= targetFailures;
-        const log = this.createLog(step, data.statuses.running,
-          `Attempt ${localAttempt}, visit ${visit}, case ${spec.id}`, integrationLog);
-        em.persist(log);
-        await em.flush();
+        const log = this.createLog(step,
+          `Attempt ${localAttempt}, visit ${visit}, case ${spec.id}`);
+        completedLogs.push(log);
         if (!fails) {
           this.finish(log, data.statuses.success,
             `SUCCESS (simulated operation) | visit=${visit} | attempt=${localAttempt} | configuration=${JSON.stringify(cfg)}`);
-          await em.flush();
-          record(step, localAttempt, 'SUCCESS', 'Continue to next ordered step');
           position++;
           break;
         }
@@ -235,55 +209,29 @@ for (const step of steps) {
         }
         this.finish(log, data.statuses.failed,
           `FAILED | visit=${visit} | attempt=${localAttempt} | sessionErrors=${sessionFailures} | action=${action}`);
-        await em.flush();
-        record(step, localAttempt, 'FAILED', action);
         if (halted || jumpedBackward) break;
       }
       if (halted) { result = 'FAILED'; break; }
       if (jumpedBackward) continue;
     }
-    if (events.length >= maxEvents) throw new Error('Execution safety guard exceeded');
+    if (operationCount > maxOperations || (operationCount === maxOperations && position < steps.length)) throw new Error('Execution safety guard exceeded');
     if (integrationLog) {
       this.finish(integrationLog, result === 'SUCCESS' ? data.statuses.success : data.statuses.failed,
         result === 'SUCCESS' ? 'Integration traversal completed' : 'Execution stopped during integration');
-      await em.flush();
     }
     this.finish(root, result === 'SUCCESS' ? data.statuses.success : data.statuses.failed,
       `CASE ${spec.id} | ${result} | failed attempts=${failures} | C session errors=${failuresByStep['VALIDATE_DEBT_FILE'] ?? 0}`);
+    // Persist only completed logs; every record has one final Status.
+    em.persist(completedLogs);
     await em.flush();
-    R.section('STEP-BY-STEP EXECUTION EVENTS');
-    R.table(events);
-    const logs = await this.showLogTree(em, root.Id);
+    const logs = completedLogs.length;
+    R.section('PERSISTED LOG RECORDS (VPP FIELDS)');
+    R.table(completedLogs.map(l => ({
+      Id: String(l.Id), StartedAt: l.StartedAt.toISOString(),
+      FinishedAt: l.FinishedAt?.toISOString() ?? '-',
+      Status: l.Status.Code, Element: l.Element.Code, Value: l.Value ?? '',
+    })));
     R.success(`Case ${spec.id} completed: ${result}, failures=${failures}`);
-    return { result, failures, logs, rootId: root.Id, caseId: spec.id, title: spec.title, events };
-  }
-
-  /** Re-query actual persisted records and display ParentLogId and tree depth. */
-  private static async showLogTree(em: any, rootId: string): Promise<number> {
-    const all: Log[] = await em.find(Log, {}, { populate: ['Element', 'Status', 'Parent'] });
-    const children = new Map<string, Log[]>();
-    for (const log of all) {
-      if (log.Parent) children.set(log.Parent.Id, [...(children.get(log.Parent.Id) ?? []), log]);
-    }
-    const root = all.find(log => log.Id === rootId);
-    if (!root) throw new Error(`Log root not found: ${rootId}`);
-    const rows: object[] = [];
-    const seen = new Set<string>();
-    const walk = (log: Log, depth: number) => {
-      if (seen.has(log.Id)) throw new Error('Log.Parent cycle detected');
-      seen.add(log.Id);
-      rows.push({ Level: depth, Element: `${'  '.repeat(depth)}${log.Element.Code}`,
-        LogId: log.Id, ParentLogId: log.Parent?.Id ?? '-',
-        Path: this.path(log.Element), StartedAt: log.StartedAt.toISOString(),
-        FinishedAt: log.FinishedAt?.toISOString() ?? '-',
-        Status: log.Status.Code, Details: log.Value ?? '' });
-      const list = children.get(log.Id) ?? [];
-      list.sort((a, b) => a.StartedAt.getTime() - b.StartedAt.getTime());
-      for (const child of list) walk(child, depth + 1);
-    };
-    walk(root, 0);
-    R.section('PERSISTED PARENT-CHILD LOG TREE');
-    R.table(rows);
-    return rows.length;
+    return { result, failures, logs, rootId: String(root.Id), caseId: spec.id, title: spec.title };
   }
 }
