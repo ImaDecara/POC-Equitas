@@ -170,7 +170,7 @@ export async function listEntity(name: EntityName) {
       case 'Element':
         return { Name: row.Name, Code: row.Code, Type: label(row.Type), Parent: label(row.Parent), Order: row.ExecutionOrder ?? '-', Fallback: label(row.Fallback), 'Max Before Fallback': row.MaxAttempsBeforeFallback, 'Max Before Failure': row.MaxAttempsBeforeFailure, 'Default Config': configText(row.DefaultConfig), Id: row.Id };
       case 'ClientElementConfig':
-        return { Client: label(row.Client), Element: label(row.Element), Configuration: configText(row.Config), Id: row.Id };
+        return { Client: label(row.Client), Element: label(row.Element), Configuration: row.Config || '{}', Id: row.Id };
       case 'LogStatus':
         return { Name: row.Name, Code: row.Code, Description: row.Description ?? '-', Enabled: row.Enabled, Id: row.Id };
       case 'Log':

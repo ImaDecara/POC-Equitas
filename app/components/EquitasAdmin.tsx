@@ -17,6 +17,7 @@ const viewItems: Array<{ id: View; label: string; icon: string }> = [
   { id: 'reference', label: 'Tablas de referencia', icon: '☷' },
 ];
 const logColumns = ['Id', 'StartedAt', 'FinishedAt', 'Status', 'Element', 'Value'];
+const pageSize = 8;
 
 function valueOf(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
@@ -31,6 +32,13 @@ function statusClass(value: unknown): string {
 function datePart(value: unknown): string {
   const raw = valueOf(value);
   return raw.includes(',') ? raw.split(',')[0] : raw.slice(0, 10);
+}
+
+/** Convert the API's en-GB date text into a sortable local timestamp. */
+function dateTimestamp(value: unknown): number {
+  const match = valueOf(value).match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!match) return 0;
+  return new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1])).getTime();
 }
 
 function csvCell(value: unknown): string {
@@ -67,6 +75,8 @@ export default function EquitasAdmin() {
   const [token, setToken] = useState('');
   const [variant, setVariant] = useState('SERVICE');
   const [filters, setFilters] = useState<Record<string, string>>({});
+  const [logPage, setLogPage] = useState(1);
+  const [dashboardDays, setDashboardDays] = useState(7);
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
   const [referenceTab, setReferenceTab] = useState<'types' | 'statuses'>('types');
 
@@ -152,22 +162,33 @@ export default function EquitasAdmin() {
     return matchesVariant && matchesFilters;
   }), [logs, elementByCode, filters, variant]);
 
+  const dashboardLogs = useMemo(() => {
+    if (dashboardDays === 0 || !logs.length) return logs;
+    const newest = Math.max(...logs.map(row => dateTimestamp(row.StartedAt)));
+    const cutoff = newest - (dashboardDays - 1) * 24 * 60 * 60 * 1000;
+    return logs.filter(row => dateTimestamp(row.StartedAt) >= cutoff);
+  }, [logs, dashboardDays]);
+
   const logSummary = useMemo(() => {
-    const success = logs.filter(row => valueOf(row.Status).toUpperCase() === 'SUCCESS').length;
-    return { total: logs.length, success, failed: logs.length - success };
-  }, [logs]);
+    const success = dashboardLogs.filter(row => valueOf(row.Status).toUpperCase() === 'SUCCESS').length;
+    return { total: dashboardLogs.length, success, failed: dashboardLogs.length - success };
+  }, [dashboardLogs]);
 
   const dailyCounts = useMemo(() => {
     const grouped = new Map<string, { success: number; failed: number }>();
-    for (const row of logs) {
+    for (const row of dashboardLogs) {
       const day = datePart(row.StartedAt);
       const entry = grouped.get(day) ?? { success: 0, failed: 0 };
       if (valueOf(row.Status).toUpperCase() === 'SUCCESS') entry.success++;
       else entry.failed++;
       grouped.set(day, entry);
     }
-    return [...grouped.entries()].slice(-7);
-  }, [logs]);
+    return [...grouped.entries()];
+  }, [dashboardLogs]);
+
+  const totalLogPages = Math.max(1, Math.ceil(visibleLogs.length / pageSize));
+  const safeLogPage = Math.min(logPage, totalLogPages);
+  const pagedLogs = visibleLogs.slice((safeLogPage - 1) * pageSize, safeLogPage * pageSize);
 
   const ordered = useMemo(() => orderedElements(elements), [elements]);
   const activeLabel = viewItems.find(item => item.id === activeView)?.label ?? 'Dashboard';
@@ -178,11 +199,11 @@ export default function EquitasAdmin() {
     const chartTicks = Array.from({ length: 6 }, (_, index) => chartMax - (chartMax / 5) * index);
     const successPercent = logSummary.total ? Math.round((logSummary.success / logSummary.total) * 100) : 0;
     return <>
-      <PageTitle title="Dashboard" detail="Resumen operativo del sistema" />
+      <PageTitle title="Dashboard" detail="Resumen operativo del sistema" actions={<label className="period-select">Período<select value={dashboardDays} onChange={event => setDashboardDays(Number(event.target.value))}><option value={7}>Últimos 7 días</option><option value={30}>Últimos 30 días</option><option value={0}>Todo el historial</option></select></label>} />
       <div className="metric-grid">
-        <Metric label="Logs totales" value={logSummary.total} tone="blue" icon="▤" />
-        <Metric label="Exitosos" value={logSummary.success} tone="green" icon="✓" />
-        <Metric label="Fallidos" value={logSummary.failed} tone="red" icon="×" />
+        <Metric label="Logs totales" value={logSummary.total} note="En el período seleccionado" tone="blue" icon="▤" />
+        <Metric label="Exitosos" value={logSummary.success} note={`${successPercent}% del total`} tone="green" icon="✓" />
+        <Metric label="Fallidos" value={logSummary.failed} note={`${100 - successPercent}% del total`} tone="red" icon="×" />
       </div>
       <div className="dashboard-grid">
         <section className="panel chart-panel">
@@ -206,8 +227,9 @@ export default function EquitasAdmin() {
     return <>
       <PageTitle title="Logs" detail="Listado de logs con variantes de vista y filtros." actions={<button className="primary-button" onClick={() => exportLogs(visibleLogs)}>Exportar CSV</button>} />
       <section className="panel">
-        <div className="variant-row"><strong>Ver variante</strong><select value={variant} onChange={event => setVariant(event.target.value)}><option value="SERVICE">Por servicio (nivel 1)</option><option value="INTEGRATION">Por integración (nivel 2)</option><option value="STEP">Por step (nivel 3)</option><option value="ALL">Todos los niveles</option></select><span>{visibleLogs.length} registros</span></div>
-        <div className="data-table-wrap"><table className="data-table logs-table"><thead><tr>{logColumns.map(column => <th key={column}>{column}</th>)}</tr><tr className="filter-row">{logColumns.map(column => <th key={column}><input aria-label={`Filtrar ${column}`} value={filters[column] ?? ''} onChange={event => setFilters(current => ({ ...current, [column]: event.target.value }))} /></th>)}</tr></thead><tbody>{visibleLogs.map(row => <tr key={valueOf(row.Id)} className={selectedLogId === valueOf(row.Id) ? 'selected-row' : ''} onClick={() => setSelectedLogId(valueOf(row.Id))}>{logColumns.map(column => <td key={column}>{column === 'Status' ? <span className={statusClass(row[column])}>{valueOf(row[column])}</span> : valueOf(row[column])}</td>)}</tr>)}</tbody></table>{!visibleLogs.length && <Empty text="No hay logs que coincidan con los filtros." />}</div>
+        <div className="variant-row"><strong>Ver variante</strong><select value={variant} onChange={event => { setVariant(event.target.value); setLogPage(1); }}><option value="SERVICE">Por servicio (nivel 1)</option><option value="INTEGRATION">Por integración (nivel 2)</option><option value="STEP">Por step (nivel 3)</option><option value="ALL">Todos los niveles</option></select><span>{visibleLogs.length} registros</span></div>
+        <div className="data-table-wrap"><table className="data-table logs-table"><thead><tr>{logColumns.map(column => <th key={column}>{column}</th>)}<th>Detalle</th></tr><tr className="filter-row">{logColumns.map(column => <th key={column}><input aria-label={`Filtrar ${column}`} value={filters[column] ?? ''} onChange={event => { setFilters(current => ({ ...current, [column]: event.target.value })); setLogPage(1); }} /></th>)}<th /></tr></thead><tbody>{pagedLogs.map(row => <tr key={valueOf(row.Id)} className={selectedLogId === valueOf(row.Id) ? 'selected-row' : ''}>{logColumns.map(column => <td key={column} onClick={() => setSelectedLogId(valueOf(row.Id))}>{column === 'Status' ? <span className={statusClass(row[column])}>{valueOf(row[column])}</span> : valueOf(row[column])}</td>)}<td><button className="table-action" onClick={() => setSelectedLogId(valueOf(row.Id))} aria-label={`Ver detalle del log ${valueOf(row.Id)}`}>Ver</button></td></tr>)}</tbody></table>{!visibleLogs.length && <Empty text="No hay logs que coincidan con los filtros." />}</div>
+        <Pagination page={safeLogPage} pageCount={totalLogPages} total={visibleLogs.length} onChange={setLogPage} />
       </section>
       {selectedLog && <LogDetail log={selectedLog} elementByCode={elementByCode} onClose={() => setSelectedLogId(null)} />}
     </>;
@@ -252,8 +274,8 @@ function PageTitle({ title, detail, actions }: { title: string; detail: string; 
   return <div className="page-title"><div><h1>{title}</h1><p>{detail}</p></div>{actions}</div>;
 }
 
-function Metric({ label, value, tone, icon }: { label: string; value: number; tone: string; icon: string }) {
-  return <article className={`metric-card ${tone}`}><div><span>{label}</span><strong>{value}</strong></div><i>{icon}</i></article>;
+function Metric({ label, value, note, tone, icon }: { label: string; value: number; note: string; tone: string; icon: string }) {
+  return <article className={`metric-card ${tone}`}><div><span>{label}</span><strong>{value}</strong><small>{note}</small></div><i>{icon}</i></article>;
 }
 
 function Legend() {
@@ -265,7 +287,19 @@ function Empty({ text }: { text: string }) {
 }
 
 function EntityTable({ columns, rows, empty }: { columns: string[]; rows: Row[]; empty: string }) {
-  return <div className="data-table-wrap"><table className="data-table"><thead><tr>{columns.map(column => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={valueOf(row.Id) === '—' ? index : valueOf(row.Id)}>{columns.map(column => <td key={column}>{column === 'Enabled' ? <span className={valueOf(row[column]) === 'Activo' ? 'status success' : 'status failed'}>{valueOf(row[column])}</span> : valueOf(row[column])}</td>)}</tr>)}</tbody></table>{!rows.length && <Empty text={empty} />}</div>;
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [page, setPage] = useState(1);
+  const filteredRows = useMemo(() => rows.filter(row => columns.every(column => valueOf(row[column]).toLowerCase().includes((filters[column] ?? '').toLowerCase()))), [rows, columns, filters]);
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const pageRows = filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize);
+  return <><div className="data-table-wrap"><table className="data-table"><thead><tr>{columns.map(column => <th key={column}>{column}</th>)}</tr><tr className="filter-row">{columns.map(column => <th key={column}><input aria-label={`Filtrar ${column}`} value={filters[column] ?? ''} onChange={event => { setFilters(current => ({ ...current, [column]: event.target.value })); setPage(1); }} /></th>)}</tr></thead><tbody>{pageRows.map((row, index) => <tr key={valueOf(row.Id) === '—' ? index : valueOf(row.Id)}>{columns.map(column => <td key={column}>{column === 'Enabled' ? <span className={valueOf(row[column]) === 'Activo' ? 'status success' : 'status failed'}>{valueOf(row[column])}</span> : valueOf(row[column])}</td>)}</tr>)}</tbody></table>{!filteredRows.length && <Empty text={empty} />}</div><Pagination page={safePage} pageCount={pageCount} total={filteredRows.length} onChange={setPage} /></>;
+}
+
+function Pagination({ page, pageCount, total, onChange }: { page: number; pageCount: number; total: number; onChange: (page: number) => void }) {
+  const start = total ? (page - 1) * pageSize + 1 : 0;
+  const end = Math.min(page * pageSize, total);
+  return <div className="pagination"><div><button disabled={page === 1} onClick={() => onChange(page - 1)}>‹</button>{Array.from({ length: pageCount }, (_, index) => index + 1).slice(0, 5).map(number => <button key={number} className={number === page ? 'active' : ''} onClick={() => onChange(number)}>{number}</button>)}<button disabled={page === pageCount} onClick={() => onChange(page + 1)}>›</button></div><span>Mostrando {start} a {end} de {total} registros</span></div>;
 }
 
 function LogDetail({ log, elementByCode, onClose }: { log: Row; elementByCode: Map<string, Row>; onClose: () => void }) {
@@ -275,7 +309,7 @@ function LogDetail({ log, elementByCode, onClose }: { log: Row; elementByCode: M
   while (current) {
     path.unshift(valueOf(current.Code));
     const parent = valueOf(current.Parent);
-    current = parent === '—' ? undefined : elementByCode.get(parent);
+    current = parent === '-' || parent === '—' ? undefined : elementByCode.get(parent);
   }
   return <section className="panel log-detail"><div className="panel-heading"><div><h2>Detalle del log #{valueOf(log.Id)}</h2><p>Campos persistidos y contexto del elemento seleccionado.</p></div><button className="secondary-button" onClick={onClose}>Cerrar</button></div><div className="detail-grid"><div className="detail-context"><span className="detail-label">Contexto del elemento</span>{path.map((item, index) => <div className="context-step" key={item}><span>{index + 1}</span>{item}</div>)}</div><dl>{logColumns.map(column => <div key={column}><dt>{column}</dt><dd>{column === 'Status' ? <span className={statusClass(log[column])}>{valueOf(log[column])}</span> : valueOf(log[column])}</dd></div>)}</dl></div></section>;
 }
