@@ -1,4 +1,4 @@
-import { initializeDb, deleteDb, clearLogs, overview, entityNames, listEntity, executionList, executionRecords, runCase, exclusive } from '../../../src/server/poc';
+import { initializeDb, deleteDb, clearLogs, overview, entityNames, listEntity, executionList, executionRecords, runCase, runExecution, exclusive } from '../../../src/server/poc';
 
 // Fuerza a que esta ruta se ejecute en el runtime de Node.js (no en Edge),
 // necesario para usar Buffer, variables de entorno y acceso a la base de datos.
@@ -91,6 +91,12 @@ export async function POST(req: Request) {
         case 'clear-logs': return clearLogs();
         // Ejecuta un caso de prueba identificado por su caseId
         case 'run-case': return runCase(Number(body.caseId));
+        // RUN Controller: receives a generic request; the engine resolves the hierarchy.
+        case 'run': return runExecution({
+          typeId: typeof body.typeId === 'string' ? body.typeId : '',
+          elementId: typeof body.elementId === 'string' ? body.elementId : '',
+          clientId: typeof body.clientId === 'string' && body.clientId ? body.clientId : undefined,
+        });
         default: throw new Error('Unknown action');
       }
     }));

@@ -91,14 +91,15 @@ export class TestDataFactory {
     steps.VALIDATE_DEBT_FILE.Fallback = steps.READ_DEBT_FILE; // C -> B
     steps.INSERT_DEBTS.Fallback = steps.READ_DEBT_FILE; // E -> B
 
-    // One ClientElementConfig for EACH of the ten existing steps.
-    // DefaultConfig belongs to Element; client JSON only contains overrides.
+    // Every element has a client configuration. Non-final nodes can therefore
+    // start the generic engine, while final steps keep their own overrides.
     const overrides: Record<string, Record<string, unknown>> = {
       OPEN_FILE_SOURCE: { timeoutMs: 60000 },
       READ_DEBT_FILE: { pageSize: 250 },
       MATCH_DEBTORS: { minConfidence: 0.95 },
     };
-    const configurations = Object.values(steps).map((element) => {
+    const configurableElements = [service, ...integrations, ...Object.values(steps)];
+    const configurations = configurableElements.map((element) => {
       const cfg = new ClientElementConfig();
       cfg.Client = client; cfg.Element = element;
       cfg.Config = JSON.stringify(overrides[element.Code] ?? {});
@@ -151,7 +152,7 @@ export class TestDataFactory {
       await em.flush();
     }
 
-    // Exactly one per client and STEP.
+    // Exactly one configuration per client and persisted element.
     em.persist(configurations);
     await em.flush();
 
@@ -209,7 +210,7 @@ export class TestDataFactory {
     }
     R.section('PERSISTED WORKFLOW HIERARCHY (BACKWARD FALLBACK REFERENCES)');
     R.table(treeRows);
-    R.success('Workflow tree and one configuration per step persisted');
+    R.success('Workflow tree and one configuration per element persisted');
     return { client, service, integrations, steps, statuses, configurations };
   }
 }

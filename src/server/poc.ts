@@ -9,6 +9,9 @@ import { LogStatus } from '../model/logStatus';
 import { Log } from '../model/log';
 import { TestDataFactory, type TestData } from '../testing/TestDataFactory';
 import { ExecutionSimulator } from '../testing/ExecutionSimulator';
+import { ExecutionEngine } from '../execution/ExecutionEngine';
+import { SimulatedExecutor } from '../execution/SimulatedExecutor';
+import type { ExecutionRequest } from '../execution/contracts';
 
 export const entityNames = [
   'Client', 'ElementType', 'Element',
@@ -124,6 +127,11 @@ export async function runCase(caseId: number) {
   return ExecutionSimulator.runOne(em, await loadTestData(em), caseId);
 }
 
+/** Starts the generic hierarchy engine with the first-stage simulated provider. */
+export async function runExecution(request: ExecutionRequest) {
+  return new ExecutionEngine(new SimulatedExecutor()).run(request);
+}
+
 /** Presenta columnas de las entidades sin exponer objetos ORM completos. */
 export async function listEntity(name: EntityName) {
   const orm = await getOrm();
@@ -134,7 +142,7 @@ export async function listEntity(name: EntityName) {
     Element: ['Parent', 'Fallback', 'Type'],
     ClientElementConfig: ['Client', 'Element'],
     LogStatus: [],
-    Log: ['Element', 'Status'],
+    Log: ['Element', 'Element.Type', 'Status'],
   };
 
   const rows: any[] = await em.find(models[name] as any, {}, {
@@ -174,7 +182,7 @@ export async function listEntity(name: EntityName) {
       case 'LogStatus':
         return { Name: row.Name, Code: row.Code, Description: row.Description ?? '-', Enabled: row.Enabled, Id: row.Id };
       case 'Log':
-        return { Id: String(row.Id), StartedAt: date(row.StartedAt), FinishedAt: date(row.FinishedAt), Status: label(row.Status), Element: label(row.Element), Value: row.Value ?? '-' };
+        return { Id: String(row.Id), StartedAt: date(row.StartedAt), FinishedAt: date(row.FinishedAt), Status: label(row.Status), Element: label(row.Element), 'Element Type': label(row.Element?.Type), Value: row.Value ?? '-' };
     }
   });
 }

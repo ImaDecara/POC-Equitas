@@ -73,12 +73,15 @@ export default function EquitasAdmin() {
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState('Listo para consultar la base de datos.');
   const [token, setToken] = useState('');
-  const [variant, setVariant] = useState('SERVICE');
+  const [variant, setVariant] = useState('ALL');
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [logPage, setLogPage] = useState(1);
   const [dashboardDays, setDashboardDays] = useState(7);
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
   const [referenceTab, setReferenceTab] = useState<'types' | 'statuses'>('types');
+  const [executionTypeId, setExecutionTypeId] = useState('');
+  const [executionElementId, setExecutionElementId] = useState('');
+  const [executionClientId, setExecutionClientId] = useState('');
 
   /** Fetch all read-only data required by the administrative views. */
   async function refreshData() {
@@ -123,6 +126,12 @@ export default function EquitasAdmin() {
       if (!response.ok) throw new Error(result.error || 'La operación no se pudo completar.');
       if (action === 'run-case') {
         setMessage(`Caso ${result.caseId}: ${result.result}. Intentos fallidos: ${result.failures}.`);
+      } else if (action === 'run') {
+        const details = Array.isArray(result.executions)
+          ? result.executions.map((item: { clientCode: string; status: string; executionId: string; executedElements: number }) =>
+            `${item.clientCode}: ${item.status}, ejecución #${item.executionId}, ${item.executedElements} pasos`).join(' | ')
+          : result.message;
+        setMessage(details || 'Motor ejecutado.');
       } else {
         setMessage(result.message || 'Operación completada.');
       }
@@ -151,12 +160,27 @@ export default function EquitasAdmin() {
   const elementTypes = records.ElementType ?? [];
   const logStatuses = records.LogStatus ?? [];
   const logs = records.Log ?? [];
+  const runnableTypes = useMemo(() => elementTypes.filter(row => !Boolean(row['Is Final']) && Boolean(row.Enabled)), [elementTypes]);
+  const runnableElements = useMemo(() => elements.filter(row =>
+    valueOf(row.Type) === valueOf(runnableTypes.find(type => valueOf(type.Id) === executionTypeId)?.Code),
+  ), [elements, runnableTypes, executionTypeId]);
   const elementByCode = useMemo(() => new Map(elements.map(row => [valueOf(row.Code), row])), [elements]);
   const selectedLog = logs.find(row => valueOf(row.Id) === selectedLogId) ?? null;
 
+  useEffect(() => {
+    if (!runnableTypes.some(row => valueOf(row.Id) === executionTypeId)) {
+      setExecutionTypeId(valueOf(runnableTypes[0]?.Id));
+    }
+  }, [runnableTypes, executionTypeId]);
+
+  useEffect(() => {
+    if (!runnableElements.some(row => valueOf(row.Id) === executionElementId)) {
+      setExecutionElementId(valueOf(runnableElements[0]?.Id));
+    }
+  }, [runnableElements, executionElementId]);
+
   const visibleLogs = useMemo(() => logs.filter(row => {
-    const element = elementByCode.get(valueOf(row.Element));
-    const matchesVariant = variant === 'ALL' || valueOf(element?.Type).toUpperCase() === variant;
+    const matchesVariant = variant === 'ALL' || valueOf(row['Element Type']).toUpperCase() === variant;
     const matchesFilters = logColumns.every(column =>
       valueOf(row[column]).toLowerCase().includes((filters[column] ?? '').toLowerCase()));
     return matchesVariant && matchesFilters;
@@ -219,7 +243,10 @@ export default function EquitasAdmin() {
         </section>
       </div>
       <section className="panel quick-panel"><div><h2>Administración</h2><p>Datos disponibles: {counts.Client ?? 0} clientes, {counts.Element ?? 0} elementos y {counts.Log ?? 0} logs.</p></div><button className="secondary-button" onClick={() => setActiveView('logs')}>Ver logs</button></section>
-      <TestControls token={token} setToken={setToken} initialized={initialized} working={working} message={message} onAction={runAction} />
+      <TestControls token={token} setToken={setToken} initialized={initialized} working={working} message={message} onAction={runAction}
+        runnableTypes={runnableTypes} runnableElements={runnableElements} clients={clients}
+        executionTypeId={executionTypeId} executionElementId={executionElementId} executionClientId={executionClientId}
+        setExecutionTypeId={setExecutionTypeId} setExecutionElementId={setExecutionElementId} setExecutionClientId={setExecutionClientId} />
     </>;
   }
 
@@ -227,7 +254,7 @@ export default function EquitasAdmin() {
     return <>
       <PageTitle title="Logs" detail="Listado de logs con variantes de vista y filtros." actions={<button className="primary-button" onClick={() => exportLogs(visibleLogs)}>Exportar CSV</button>} />
       <section className="panel">
-        <div className="variant-row"><strong>Ver variante</strong><select value={variant} onChange={event => { setVariant(event.target.value); setLogPage(1); }}><option value="SERVICE">Por servicio (nivel 1)</option><option value="INTEGRATION">Por integración (nivel 2)</option><option value="STEP">Por step (nivel 3)</option><option value="ALL">Todos los niveles</option></select><span>{visibleLogs.length} registros</span></div>
+        <div className="variant-row"><strong>Ver variante</strong><select value={variant} onChange={event => { setVariant(event.target.value); setLogPage(1); }}><option value="ALL">Todos los niveles</option>{elementTypes.filter(row => Boolean(row.Enabled)).map(row => <option key={valueOf(row.Id)} value={valueOf(row.Code)}>Por {valueOf(row.Name)}</option>)}</select><span>{visibleLogs.length} registros</span></div>
         <div className="data-table-wrap"><table className="data-table logs-table"><thead><tr>{logColumns.map(column => <th key={column}>{column}</th>)}<th>Detalle</th></tr><tr className="filter-row">{logColumns.map(column => <th key={column}><input aria-label={`Filtrar ${column}`} value={filters[column] ?? ''} onChange={event => { setFilters(current => ({ ...current, [column]: event.target.value })); setLogPage(1); }} /></th>)}<th /></tr></thead><tbody>{pagedLogs.map(row => <tr key={valueOf(row.Id)} className={selectedLogId === valueOf(row.Id) ? 'selected-row' : ''}>{logColumns.map(column => <td key={column} onClick={() => setSelectedLogId(valueOf(row.Id))}>{column === 'Status' ? <span className={statusClass(row[column])}>{valueOf(row[column])}</span> : valueOf(row[column])}</td>)}<td><button className="table-action" onClick={() => setSelectedLogId(valueOf(row.Id))} aria-label={`Ver detalle del log ${valueOf(row.Id)}`}>Ver</button></td></tr>)}</tbody></table>{!visibleLogs.length && <Empty text="No hay logs que coincidan con los filtros." />}</div>
         <Pagination page={safeLogPage} pageCount={totalLogPages} total={visibleLogs.length} onChange={setLogPage} />
       </section>
@@ -314,10 +341,21 @@ function LogDetail({ log, elementByCode, onClose }: { log: Row; elementByCode: M
   return <section className="panel log-detail"><div className="panel-heading"><div><h2>Detalle del log #{valueOf(log.Id)}</h2><p>Campos persistidos y contexto del elemento seleccionado.</p></div><button className="secondary-button" onClick={onClose}>Cerrar</button></div><div className="detail-grid"><div className="detail-context"><span className="detail-label">Contexto del elemento</span>{path.map((item, index) => <div className="context-step" key={item}><span>{index + 1}</span>{item}</div>)}</div><dl>{logColumns.map(column => <div key={column}><dt>{column}</dt><dd>{column === 'Status' ? <span className={statusClass(log[column])}>{valueOf(log[column])}</span> : valueOf(log[column])}</dd></div>)}</dl></div></section>;
 }
 
-function TestControls({ token, setToken, initialized, working, message, onAction }: { token: string; setToken: (value: string) => void; initialized: boolean; working: boolean; message: string; onAction: (action: string, body?: Record<string, unknown>) => Promise<void> }) {
+function TestControls({
+  token, setToken, initialized, working, message, onAction,
+  runnableTypes, runnableElements, clients,
+  executionTypeId, executionElementId, executionClientId,
+  setExecutionTypeId, setExecutionElementId, setExecutionClientId,
+}: {
+  token: string; setToken: (value: string) => void; initialized: boolean; working: boolean; message: string;
+  onAction: (action: string, body?: Record<string, unknown>) => Promise<void>;
+  runnableTypes: Row[]; runnableElements: Row[]; clients: Row[];
+  executionTypeId: string; executionElementId: string; executionClientId: string;
+  setExecutionTypeId: (value: string) => void; setExecutionElementId: (value: string) => void; setExecutionClientId: (value: string) => void;
+}) {
   const removeDatabase = () => {
     if (!window.confirm('¿Eliminar todas las tablas y los logs del POC?')) return;
     if (window.prompt('Escribí DELETE POC DATABASE para confirmar') === 'DELETE POC DATABASE') onAction('delete', { confirm: 'DELETE POC DATABASE' });
   };
-  return <section className="test-area"><div className="test-heading"><div><span className="eyebrow">ENTORNO TÉCNICO</span><h2>Pruebas de escritorio</h2><p>Los casos quedan fuera de la operación administrativa habitual.</p></div><span className="feedback">{message}</span></div><div className="control-row"><label>Token de administración<input type="password" value={token} placeholder="POC_ADMIN_TOKEN" onChange={event => setToken(event.target.value)} /></label><button className="secondary-button" disabled={working} onClick={() => onAction('initialize')}>Inicializar base</button><button className="secondary-button" disabled={working || !initialized} onClick={() => onAction('clear-logs')}>Limpiar logs</button><button className="secondary-button" disabled={working} onClick={() => onAction('hop')}>Conectar Apache Hop</button><button className="danger-button" disabled={working || !initialized} onClick={removeDatabase}>Eliminar base</button></div><div className="scenario-grid">{scenarios.map((scenario, index) => <article className="scenario" key={scenario}><span>CASO {index + 1}</span><strong>{scenario}</strong><button className="primary-button" disabled={working || !initialized} onClick={() => onAction('run-case', { caseId: index + 1 })}>Run Case</button></article>)}</div></section>;
+  return <section className="test-area"><div className="test-heading"><div><span className="eyebrow">ENTORNO TÉCNICO</span><h2>Pruebas de escritorio</h2><p>El motor usa la estructura y configuración persistidas; los casos quedan como pruebas separadas.</p></div><span className="feedback">{message}</span></div><div className="control-row"><label>Token de administración<input type="password" value={token} placeholder="POC_ADMIN_TOKEN" onChange={event => setToken(event.target.value)} /></label><button className="secondary-button" disabled={working} onClick={() => onAction('initialize')}>Inicializar base</button><button className="secondary-button" disabled={working || !initialized} onClick={() => onAction('clear-logs')}>Limpiar logs</button><button className="secondary-button" disabled={working} onClick={() => onAction('hop')}>Conectar Apache Hop</button><button className="danger-button" disabled={working || !initialized} onClick={removeDatabase}>Eliminar base</button></div><div className="engine-runner"><div><span className="eyebrow">MOTOR GENÉRICO</span><h3>Ejecutar estructura</h3><p>Solo aparecen tipos no finales y datos cargados desde la base.</p></div><label>Tipo<select value={executionTypeId} onChange={event => setExecutionTypeId(event.target.value)}>{runnableTypes.map(type => <option key={valueOf(type.Id)} value={valueOf(type.Id)}>{valueOf(type.Name)}</option>)}</select></label><label>Elemento<select value={executionElementId} onChange={event => setExecutionElementId(event.target.value)}>{runnableElements.map(element => <option key={valueOf(element.Id)} value={valueOf(element.Id)}>{valueOf(element.Name)}</option>)}</select></label><label>Cliente<select value={executionClientId} onChange={event => setExecutionClientId(event.target.value)}><option value="">Todos los configurados</option>{clients.filter(client => Boolean(client.Enabled)).map(client => <option key={valueOf(client.Id)} value={valueOf(client.Id)}>{valueOf(client.Name)}</option>)}</select></label><button className="primary-button" disabled={working || !initialized || !executionTypeId || !executionElementId} onClick={() => onAction('run', { typeId: executionTypeId, elementId: executionElementId, ...(executionClientId ? { clientId: executionClientId } : {}) })}>Ejecutar motor</button></div><div className="scenario-grid">{scenarios.map((scenario, index) => <article className="scenario" key={scenario}><span>CASO {index + 1}</span><strong>{scenario}</strong><button className="primary-button" disabled={working || !initialized} onClick={() => onAction('run-case', { caseId: index + 1 })}>Run Case</button></article>)}</div></section>;
 }
